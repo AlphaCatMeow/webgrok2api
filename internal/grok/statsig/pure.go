@@ -53,8 +53,8 @@ const (
 // verified accepted by grok (passed the anti-bot gate). HEX == f(seed), so this
 // pair is internally consistent and accepted regardless of the page seed.
 const (
-	defaultSeedB64 = "+yDQu9CyfFekeONYvuXYqIGtrRCE0LBIp1nhdPwaearzhgv5DxHCzznCYxNyIXYY"
-	defaultHEX     = "388bf10d70a3d70a3d70808cccccccccccd08cccccccccccd0d70a3d70a3d70800"
+	defaultSeedB64 = "Ri4L/GX6aGftT2X7L9NzsXcwBuPF9iI0F+mRuYxPG9dXpHlMPNp6BY8FPaSsoYVS"
+	defaultHEX     = "ff97d50e8f5c28f5c28f8068f5c28f5c28f4068f5c28f5c28f40e8f5c28f5c28f800"
 )
 
 // pair holds the active (seed, HEX). Guarded by mu so it can be refreshed at
