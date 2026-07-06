@@ -16,6 +16,11 @@
 // passed the anti-bot gate); only the embedded pair's internal consistency
 // matters, not its age or the page it came from.
 //
+// Runtime can either use a known-good captured (seed, HEX) pair, or set a fresh
+// seed plus Go-generated HEX via statsig.SetPair. The latter is used when the
+// caller fetches grok.com's HTML seed and computes HEX from the current build's
+// SVG path table.
+//
 // Reversed algorithm (pure-Go reproduction verified BYTE-EXACT vs grok's own JS,
 // 70/70, against a live browser sY() capture):
 //

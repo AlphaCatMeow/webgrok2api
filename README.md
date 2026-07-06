@@ -156,11 +156,11 @@ user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ..."
 > **提示**
 > - `cf_clearance` 有效期通常几小时到一天，过期后需重新抓取，否则会返回 403。
 > - 把整段 Cookie 头都放进 `cf_cookies` 即可，程序会自动提取所需部分。
-> - `x-statsig-id` 等反 bot 头由程序用纯 Go 实时生成，**无需手动配置**；如需使用浏览器真实值以提高成功率，可抓取 `statsig_seed` / `statsig_hex` 并填入配置，详见下方[抓取 statsig 指纹](#抓取-statsig-指纹)。
+> - `x-statsig-id` 等反 bot 头由程序用纯 Go 实时生成，**无需手动配置**；启用 `statsig_from_html = true` 时程序会自动抓取 grok.com HTML 种子并结合内置 SVG 路径表生成 HEX，无需手动抓取。如需手动指定浏览器真实值，可抓取 `statsig_seed` / `statsig_hex` 并填入配置，详见下方[抓取 statsig 指纹](#抓取-statsig-指纹)。
 
 ### 抓取 statsig 指纹
 
-程序内置纯 Go 生成 `x-statsig-id`，大多数场景无需额外配置。但如果频繁触发反 bot 检测，可以使用仓库提供的浏览器脚本抓取**真实**的 `statsig_seed` 和 `statsig_hex` 填入配置。
+程序内置纯 Go 生成 `x-statsig-id`，大多数场景无需额外配置。**推荐**启用 `statsig_from_html = true`，程序会自动抓取 grok.com HTML 种子并结合内置 SVG 路径表生成 HEX，无需手动干预。如频繁触发反 bot 检测且未启用自动模式，可使用仓库提供的浏览器脚本抓取**真实**的 `statsig_seed` 和 `statsig_hex` 填入配置。
 
 **步骤：**
 
@@ -231,6 +231,7 @@ cf_cookies = ""                 # 手动模式：浏览器 Cookie 串（含 cf_c
 user_agent = "..."              # 需与抓取 Cookie 时的 UA 一致
 statsig_seed = ""               # 可选：真实 statsig 种子（抓取方法见「抓取 statsig 指纹」章节）
 statsig_hex  = ""               # 可选：真实 statsig HEX 指纹
+statsig_from_html = false       # 推荐：启用后自动从 grok.com HTML 种子 + 内置 SVG 路径表生成 HEX
 
 [retry]
 max_retries = 1                 # 换账号重试最大次数（0 = 不重试）
@@ -385,7 +386,7 @@ A: 这是 Grok 的反爬机制，通常是 `cf_clearance` 缺失或过期。解�
 2. 确保 `proxy.clearance.user_agent` 与抓取时浏览器的 UA 完全一致
 3. 若使用代理，确认代理出口 IP 与浏览器 IP 一致（cf_clearance 绑定 IP）
 
-> `x-statsig-id` 等反 bot 头由程序自动生成，无需手动处理。如遇频繁拦截，可手动抓取真实值，详见[抓取 statsig 指纹](#抓取-statsig-指纹)。
+> `x-statsig-id` 等反 bot 头由程序自动生成，无需手动处理。推荐启用 `statsig_from_html = true` 以自动使用动态 HTML 种子 + SVG 路径表生成 HEX。如遇频繁拦截且未启用自动模式，可手动抓取真实值，详见[抓取 statsig 指纹](#抓取-statsig-指纹)。
 
 **Q: 如何获取 cf_clearance？**
 A: 登录 grok.com，F12 → Network → 刷新页面 → 找到任意 grok.com 请求 → Request Headers → Cookie → 复制 `cf_clearance=...` 的值。有效期通常几小时到一天。最简单的做法是把整段 Cookie 头都粘进 `cf_cookies`。

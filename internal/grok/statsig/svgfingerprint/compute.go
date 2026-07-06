@@ -37,9 +37,13 @@
 // Since grok does NOT require the statsig seed to match the current page seed
 // (only internal consistency: HEX == f(embedded_seed)), the recommended approach is:
 //
-//  1. Capture ONE genuine (seed, HEX) pair from a browser session.
-//  2. Hardcode it in pure.go (SetPair or config).
-//  3. Generate unlimited statsigs with fresh timestamps using pure Go.
+//   1. Capture the current grok build's four statsig SVG path `d` values once.
+//   2. Store them in DefaultSVGPaths.
+//   3. At runtime fetch a fresh HTML seed, select DefaultSVGPaths[seed[5]%4],
+//      compute HEX, and call statsig.SetPair(seed, hex).
+//
+// A fallback of capturing ONE genuine (seed, HEX) pair from a browser session
+// and hardcoding it in pure.go (SetPair or config) also remains valid.
 //
 // This module provides the ComputeHEX function for when you DO have SVG path
 // data (e.g., from a CDP breakpoint or from parsing JS chunks), plus helper
@@ -409,5 +413,7 @@ Algorithm: d.slice(9).split("C").map(seg => seg.replace(/[^\d]+/g," ")
 
 Key: uses JS Number.toString(16), NOT IEEE-754 float64 bytes.
 SVG source: transient .r-bx02o element, not in SSR HTML.
-Recommended: capture one (seed,HEX) pair from browser, use pure.go Generate().`)
+Preferred: capture build SVG paths, fetch HTML seed at runtime,
+use ComputeHEXForSeedB64(seed) + statsig.SetPair(seed, hex).
+Fallback: capture one (seed,HEX) pair from browser, use pure.go Generate().`)
 }
