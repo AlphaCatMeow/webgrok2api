@@ -171,7 +171,7 @@ Grok 有 Cloudflare + 自研反爬机制。要正常调用，需要从浏览器�
 ```toml
 [proxy.clearance]
 # 整段 Cookie 也可以直接粘贴（程序会自动提取所需部分）
-cf_cookies = "cf_clearance=...; __cf_bm=..."
+cf_cookies = "cf_clearance=..."
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 # 从浏览器 Cookies 中逐个复制
 x_anonuserid = "717688f6-ea07-4d30-ba7c-af3626e8ab78"
