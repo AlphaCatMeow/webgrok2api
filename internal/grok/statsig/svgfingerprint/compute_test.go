@@ -175,11 +175,17 @@ func TestComputeHEXForSeedSelectsSeedModulo4(t *testing.T) {
 	for wantIdx := 0; wantIdx < 4; wantIdx++ {
 		seed := make([]byte, 48)
 		seed[5] = byte(wantIdx)
+		seed[22] = 3
+		seed[23] = 5
+		seed[24] = 7
 		got, err := ComputeHEXForSeed(seed)
 		if err != nil {
 			t.Fatalf("ComputeHEXForSeed idx=%d: %v", wantIdx, err)
 		}
-		want := ComputeHEX(DefaultSVGPaths[wantIdx])
+		want, err := computeAnimationHEX(DefaultSVGPaths[wantIdx], seed)
+		if err != nil {
+			t.Fatalf("computeAnimationHEX idx=%d: %v", wantIdx, err)
+		}
 		if got != want {
 			t.Fatalf("idx=%d selected wrong path: got %s want %s", wantIdx, got, want)
 		}
@@ -189,14 +195,32 @@ func TestComputeHEXForSeedSelectsSeedModulo4(t *testing.T) {
 func TestComputeHEXForSeedB64(t *testing.T) {
 	seed := make([]byte, 48)
 	seed[5] = 2
+	seed[22] = 3
+	seed[23] = 5
+	seed[24] = 7
 	seedB64 := base64.StdEncoding.EncodeToString(seed)
 	got, err := ComputeHEXForSeedB64(seedB64)
 	if err != nil {
 		t.Fatalf("ComputeHEXForSeedB64: %v", err)
 	}
-	want := ComputeHEX(DefaultSVGPaths[2])
+	want, err := computeAnimationHEX(DefaultSVGPaths[2], seed)
+	if err != nil {
+		t.Fatalf("computeAnimationHEX: %v", err)
+	}
 	if got != want {
 		t.Fatalf("got %s want %s", got, want)
+	}
+}
+
+func TestComputeHEXForSeedB64_LiveCapture(t *testing.T) {
+	seedB64 := "t2ODAFY4ozXd0K2Y8MdI2XfxTDiJoakZPuoaKfcQn8VuasZMcKliyhA1pJ+o1oMf"
+	want := "3bab9506b851eb851eb840e8f5c28f5c28f80e8f5c28f5c28f806b851eb851eb8400"
+	got, err := ComputeHEXForSeedB64(seedB64)
+	if err != nil {
+		t.Fatalf("ComputeHEXForSeedB64: %v", err)
+	}
+	if got != want {
+		t.Fatalf("live capture mismatch:\ngot:  %s\nwant: %s", got, want)
 	}
 }
 

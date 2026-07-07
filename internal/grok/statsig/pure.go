@@ -10,16 +10,16 @@
 //
 // KEY FINDING (verified live): grok does NOT require the statsig's seed to match
 // the seed in the current page's <meta>. It only checks internal self-consistency
-// (HEX == f(embedded seed)). So ONE genuine (seed, HEX) pair — captured once from
-// a real browser — generates unlimited valid statsigs with fresh timestamps.
-// A stale genuine pair + a fresh timestamp was accepted (code:8 quota, i.e. it
-// passed the anti-bot gate); only the embedded pair's internal consistency
-// matters, not its age or the page it came from.
+// (HEX == f(embedded seed)). At startup we generate a random 48-byte seed and
+// compute its HEX via the in-Go reverse of grok's statsig algorithm
+// (svgfingerprint.ComputeHEXForSeed). The pair is internally consistent and
+// produces unlimited valid statsigs with fresh timestamps. No browser-captured
+// pair is required.
 //
-// Runtime can either use a known-good captured (seed, HEX) pair, or set a fresh
-// seed plus Go-generated HEX via statsig.SetPair. The latter is used when the
-// caller fetches grok.com's HTML seed and computes HEX from the current build's
-// SVG path table.
+// Runtime can:
+//   - use the auto-generated pair (default, no setup needed)
+//   - override via statsig.SetPair from config (e.g. browser-captured pair)
+//   - rotate via statsig.RotatePair (mint a fresh random pair)
 //
 // Reversed algorithm (pure-Go reproduction verified BYTE-EXACT vs grok's own JS,
 // 70/70, against a live browser sY() capture):
@@ -33,9 +33,6 @@
 //	out[1..48]  = seed[i] XOR key                              // embedded seed
 //	out[49..69] = tail[i] XOR key
 //	x-statsig-id = base64.RawStdEncoding(out)                  // 70 bytes → 94 chars
-//
-// Refresh the (seed, HEX) pair only if grok changes the algorithm/epoch (rare);
-// capture a fresh genuine pair from the browser console (see CaptureSnippet).
 package statsig
 
 import (
@@ -46,6 +43,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/aurora-develop/grok2api/internal/grok/statsig/svgfingerprint"
 )
 
 const (
@@ -54,21 +53,41 @@ const (
 	statsigMark  = 0x03              // tail[20] constant marker
 )
 
-// Genuine (seed, HEX) pair captured from a live grok.com browser session and
-// verified accepted by grok (passed the anti-bot gate). HEX == f(seed), so this
-// pair is internally consistent and accepted regardless of the page seed.
-const (
-	defaultSeedB64 = "Ri4L/GX6aGftT2X7L9NzsXcwBuPF9iI0F+mRuYxPG9dXpHlMPNp6BY8FPaSsoYVS"
-	defaultHEX     = "ff97d50e8f5c28f5c28f8068f5c28f5c28f4068f5c28f5c28f40e8f5c28f5c28f800"
-)
-
 // pair holds the active (seed, HEX). Guarded by mu so it can be refreshed at
-// runtime (e.g. from config) without races.
+// runtime (e.g. from config) without races. Initialised lazily via initActive
+// so the svgfingerprint package is fully initialised by the time we compute HEX.
 var (
 	mu      sync.RWMutex
-	curSeed []byte = mustDecodeSeed(defaultSeedB64)
-	curHEX  string = defaultHEX
+	curSeed []byte
+	curHEX  string
 )
+
+func init() {
+	seed := freshSeed()
+	mu.Lock()
+	curSeed = seed
+	curHEX = freshHEX(seed)
+	mu.Unlock()
+}
+
+// freshSeed generates a random 48-byte seed.
+func freshSeed() []byte {
+	b := make([]byte, 48)
+	if _, err := rand.Read(b); err != nil {
+		panic("statsig: crypto/rand failed: " + err.Error())
+	}
+	return b
+}
+
+// freshHEX computes the SVG-animation fingerprint HEX for a freshly-minted seed
+// using the in-Go reverse of grok's statsig algorithm.
+func freshHEX(seed []byte) string {
+	hex, err := svgfingerprint.ComputeHEXForSeed(seed)
+	if err != nil {
+		panic("statsig: fresh HEX failed: " + err.Error())
+	}
+	return hex
+}
 
 // SetPair overrides the (seed, HEX) pair, e.g. from a freshly captured value in
 // config. seedB64 must decode to 48 bytes; both must be a GENUINE matched pair
@@ -90,6 +109,16 @@ func SetPair(seedB64, hex string) error {
 	return nil
 }
 
+// RotatePair mints a brand-new random (seed, HEX) pair. Useful when grok
+// rotates its anti-bot policy and starts rejecting the current pair.
+func RotatePair() {
+	seed := freshSeed()
+	mu.Lock()
+	curSeed = seed
+	curHEX = freshHEX(seed)
+	mu.Unlock()
+}
+
 // Generate returns a fresh x-statsig-id for the request (pathname, method),
 // e.g. Generate("/rest/app-chat/conversations/new", "POST", time.Now().Unix()).
 func Generate(pathname, method string, nowUnix int64) (string, error) {
@@ -102,7 +131,7 @@ func Generate(pathname, method string, nowUnix int64) (string, error) {
 // build assembles the 70-byte statsig from a (seed, HEX) pair.
 func build(seed []byte, hex, pathname, method string, nowUnix int64) (string, error) {
 	if len(seed) != 48 {
-		return "", errors.New("statsig: seed must be 48 bytes")
+		return "", errors.New("statsig: seed must decode to 48 bytes")
 	}
 	number := uint32(nowUnix - statsigEpoch)
 
@@ -160,12 +189,4 @@ func decodeSeed(s string) ([]byte, error) {
 		return b, nil
 	}
 	return base64.RawStdEncoding.DecodeString(s)
-}
-
-func mustDecodeSeed(s string) []byte {
-	b, err := decodeSeed(s)
-	if err != nil || len(b) != 48 {
-		panic("statsig: bad default seed")
-	}
-	return b
 }

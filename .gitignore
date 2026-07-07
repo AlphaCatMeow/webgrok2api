@@ -12,9 +12,12 @@ CLAUDE.md
 # Claude sessions
 /.claude/
 *.js
+docs/
+.superpowers/
 !capture_statsig_pair.js
 !capture_statsig_pair_v5.js
 # Temp / test files
 /fresh-req.json
 reverse_task/
+js
 grok2api-py/

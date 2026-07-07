@@ -112,16 +112,20 @@ func BuildSSOCookie(ssoToken string, profile proxyProfile) string {
 //
 // Priority:
 //  1. proxy.clearance.statsig_id — a full fixed value (manual override).
-//  2. Real pure-Go generation via the statsig package. An optional genuine
-//     (seed, HEX) pair from config (proxy.clearance.statsig_seed / _hex) is
-//     applied so it can be refreshed without a rebuild if grok rotates the
-//     algorithm; otherwise the package's embedded default pair is used.
-//  3. Fallback to the legacy error-format fake if generation fails.
+//  2. Dynamic pair from HTML: fetch grok.com via tls_client, extract seed from
+//     <meta name="grok-site‑verification">, find SVG paths, compute HEX via
+//     svgfingerprint. Refreshed periodically (see statsigRefreshInterval).
+//  3. Config-provided pair (proxy.clearance.statsig_seed / _hex).
+//  4. Embedded default pair in the statsig package.
+//  5. Fallback to the legacy error-format fake if generation fails.
 func statsigID(pathname, method string) string {
 	cfg := config.Global()
 	if sid := strings.TrimSpace(cfg.GetStr("proxy.clearance.statsig_id", "")); sid != "" {
 		return sid
 	}
+	// Try dynamic pair from HTML (periodic refresh)
+	applyStatsigPairFromHTML()
+	// Config override takes precedence over dynamic
 	applyStatsigPairFromConfig()
 	if pathname == "" {
 		pathname = "/rest/app-chat/conversations/new"
@@ -224,13 +228,14 @@ func clientHints(_ string, ua string) map[string]string {
 	if strings.Contains(u, "mobile") || plat == "Android" || plat == "iOS" {
 		mobile = "?1"
 	}
+	verBucket := versionBucket(ver)
 
 	// Build only the hints that are non-empty — order matches Python build order.
 	hints := map[string]string{
-		"Sec-Ch-Ua":                  fmt.Sprintf(`"Google Chrome";v="%s", "Chromium";v="%s", "Not/A)Brand";v="99"`, ver, ver),
+		"Sec-Ch-Ua":                  fmt.Sprintf(`"Google Chrome";v="%s", "Chromium";v="%s", "Not/A)Brand";v="99"`, verBucket, verBucket),
 		"Sec-Ch-Ua-Mobile":           mobile,
 		"Sec-Ch-Ua-Model":            `""`,
-		"Sec-Ch-Ua-Full-Version":     fmt.Sprintf(`"%s.0.0.0"`, ver),
+		"Sec-Ch-Ua-Full-Version":     fmt.Sprintf(`"%s.0.0.0"`, verBucket),
 		"Sec-Ch-Ua-Platform-Version": `"13.0.0"`,
 	}
 	if plat != "" {
@@ -243,7 +248,7 @@ func clientHints(_ string, ua string) map[string]string {
 	return hints
 }
 
-var versionRE = regexp.MustCompile(`(\d{2,3})`)
+var versionRE = regexp.MustCompile(`[Cc]hrome/(\d{2,3})`)
 
 func versionFromUA(ua string) string {
 	m := versionRE.FindStringSubmatch(ua)
@@ -251,6 +256,15 @@ func versionFromUA(ua string) string {
 		return m[1]
 	}
 	return ""
+}
+
+// versionBucket returns the reduced Chrome version for Sec-Ch-Ua.
+// Chrome ≥ 100 uses a bucket: 147→10, 126→12, etc.
+func versionBucket(full string) string {
+	if len(full) >= 3 {
+		return full[:len(full)-1]
+	}
+	return full
 }
 
 func platformFromUA(u string) string {
@@ -283,6 +297,13 @@ func archFromUA(u string) string {
 // BuildHTTPHeaders builds the standard reverse-proxy headers for a grok.com
 // request. reqURL and method are used to compute the per-request x-statsig-id.
 // Returns standard net/http.Header.
+//
+// Sends only the minimal headers that grok's anti-bot requires — Content-Type,
+// User-Agent, Cookie (with sso + cf_clearance + anti-bot tokens), x-statsig-id.
+// Extra browser-fingerprint headers (sentry-trace, Baggage, Sec-Ch-Ua*, etc.)
+// are omitted because grok detects mismatches between these and a real browser
+// session, causing code:7 anti-bot rejection. The minimal set was verified to
+// pass anti-bot (HTTP 404 code:5 = "Model not found", confirming acceptance).
 func BuildHTTPHeaders(ssoToken string, contentType, origin, referer, reqURL, method string, profile proxyProfile) http.Header {
 	ua := profile.UserAgent
 	if ua == "" {
@@ -291,47 +312,13 @@ func BuildHTTPHeaders(ssoToken string, contentType, origin, referer, reqURL, met
 	if contentType == "" {
 		contentType = "application/json"
 	}
-	accept := "*/*"
-	fetchDest := "empty"
-	switch contentType {
-	case "application/json":
-		accept = "*/*"
-		fetchDest = "empty"
-	case "image/jpeg", "image/png", "video/mp4", "video/webm":
-		accept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-		fetchDest = "document"
-	}
-
-	site := "same-site"
-	if origin != "" && referer != "" {
-		oHost := hostOf(origin)
-		rHost := hostOf(referer)
-		if oHost != "" && oHost == rHost {
-			site = "same-origin"
-		}
-	}
-
 	h := http.Header{}
-	h.Set("Accept", accept)
-	h.Set("Accept-Encoding", "gzip, deflate, br, zstd")
-	h.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	h.Set("Baggage", "sentry-environment=production,sentry-release=7abc7fa0b441c5399d4efe48c6cab1b17c9d61d5,sentry-public_key=b311e0f2690c81f25e2c4cf6d4f7ce1c")
 	h.Set("Content-Type", contentType)
-	h.Set("Origin", orDefault(origin, "https://grok.com"))
-	h.Set("Referer", orDefault(referer, "https://grok.com/"))
-	h.Set("Sec-Fetch-Dest", fetchDest)
-	h.Set("Sec-Fetch-Mode", "cors")
-	h.Set("Sec-Fetch-Site", site)
-	h.Set("sentry-trace", fmt.Sprintf("%s-%s-0", newTraceID(), newSpanID()))
-	h.Set("traceparent", fmt.Sprintf("00-%s-%s-00", newTraceID(), newSpanID()))
 	h.Set("User-Agent", ua)
 	h.Set("x-statsig-id", statsigID(pathOf(reqURL), method))
-	h.Set("x-xai-request-id", uuid.NewString())
+	cookie := BuildSSOCookie(ssoToken, profile)
+	h.Set("Cookie", cookie)
 
-	for k, v := range clientHints("", ua) {
-		h.Set(k, v)
-	}
-	h.Set("Cookie", BuildSSOCookie(ssoToken, profile))
 	return h
 }
 
