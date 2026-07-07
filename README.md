@@ -145,7 +145,7 @@ Grok 有 Cloudflare + 自研反爬机制。要正常调用，需要从浏览器�
 1. 打开 [grok.com](https://grok.com)（已登录），F12 → **Network**
 2. 在 Grok 页面随便发一条消息
 3. 找到 `conversations/new` 请求 → **Headers** → **Cookie**
-4. 复制 `cf_clearance` 和 `__cf_bm` 的值
+4. 复制 `cf_clearance` 的值
 
 ### 第二步：抓取 grok 会话令牌
 
