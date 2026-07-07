@@ -10,7 +10,7 @@
 - **智能选号** — 配额感知策略（按剩余配额评分）和随机策略，自动故障转移
 - **浏览器指纹伪装** — TLS 指纹、HTTP/2 头序、Chrome 客户端提示，规避上游检测
 - **WebSocket 图像生成** — 通过 `wss://grok.com/ws/imagine/listen` 实时流式生成图像，支持进度回调
-- **纯 Go 生成反 bot 头** — `x-statsig-id` 等头由内置算法实时生成，无需浏览器或 JS 运行时
+- **纯 Go 生成反 bot 头** — `x-statsig-id` 由内置 CSS 动画指纹算法实时生成（启动时自动创建随机 seed + HEX），无需浏览器或 JS 运行时
 - **代理支持** — 直连 / 单代理，兼容 HTTP/HTTPS/SOCKS4/5
 - **Cloudflare 绕过** — 手动 Cookie 注入，`cf_clearance` 自动提取
 - **本地媒体缓存** — 图片和视频本地缓存，LRU 淘汰
@@ -86,7 +86,7 @@ curl -X POST http://localhost:8000/admin/api/tokens/add \
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "grok-4.20-0309",
+    "model": "grok-4.20-0309-non-reasoning",
     "messages": [{"role": "user", "content": "你好！"}],
     "stream": true
   }'
@@ -99,7 +99,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 你的sso-token" \
   -d '{
-    "model": "grok-4.20-0309",
+    "model": "grok-4.20-0309-non-reasoning",
     "messages": [{"role": "user", "content": "你好！"}],
     "stream": true
   }'
@@ -115,7 +115,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="any")
 
 response = client.chat.completions.create(
-    model="grok-4.20-0309",
+    model="grok-4.20-0309-non-reasoning",
     messages=[{"role": "user", "content": "你好！"}],
 )
 print(response.choices[0].message.content)
@@ -129,7 +129,7 @@ import anthropic
 client = anthropic.Anthropic(base_url="http://localhost:8000", api_key="any")
 
 message = client.messages.create(
-    model="grok-4.20-0309",
+    model="grok-4.20-0309-non-reasoning",
     max_tokens=4096,
     messages=[{"role": "user", "content": "你好！"}],
 )
@@ -143,48 +143,46 @@ Grok 有 Cloudflare + 自研反爬机制。要正常调用，最关键的是从�
 1. 打开 [grok.com](https://grok.com)（已登录），F12 → **Network**
 2. 在 Grok 页面随便发一条消息
 3. 找到 `conversations/new` 请求 → **Headers** → **Cookie**
-4. 复制 Cookie 字符串到 `data/config.toml`：
+4. 复制以下字段到 `data/config.toml`：
 
 ```toml
 [proxy.clearance]
-# 直接粘贴整段 Cookie 头，程序会自动提取 cf_clearance 等字段
-cf_cookies = "cf_clearance=...; sso=...; grok_device_id=...; ..."
-# 抓取 Cookie 时浏览器使用的 User-Agent（必须一致，否则 cf_clearance 失效）
-user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ..."
+# 浏览器中抓取的完整 Cookie（含 cf_clearance、x-anonuserid、x-challenge、x-signature、x-userid）
+cf_cookies = "cf_clearance=...; x-anonuserid=...; x-challenge=...; x-signature=...; x-userid=..."
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+# 以下字段从浏览器 Cookie 中单独提取（程序也会从 cf_cookies 自动提取，但显式配置更可靠）
+x_anonuserid = "717688f6-..."
+x_challenge = "Zb6xK8xUxi..."
+x_signature = "5H1cUg2b..."
+x_userid = "2a0af403-..."
 ```
 
 > **提示**
 > - `cf_clearance` 有效期通常几小时到一天，过期后需重新抓取，否则会返回 403。
+> - `x-challenge` / `x-signature` / `x-anonuserid` / `x-userid` 是 grok 内部匿名会话的 anti-bot 令牌，**必须与 `cf_clearance` 来自同一浏览器会话**。
+> - `x-statsig-id` 反 bot 头由纯 Go 实时自动生成（启动时自动创建随机 seed + 内置 HEX 算法），**无需手动配置**。如果被 grok 拒绝（code:7），可调用 `RotatePair()` 刷新。
 > - 把整段 Cookie 头都放进 `cf_cookies` 即可，程序会自动提取所需部分。
-> - `x-statsig-id` 等反 bot 头由程序用纯 Go 实时生成，**无需手动配置**；启用 `statsig_from_html = true` 时程序会自动抓取 grok.com HTML 种子并结合内置 SVG 路径表生成 HEX，无需手动抓取。如需手动指定浏览器真实值，可抓取 `statsig_seed` / `statsig_hex` 并填入配置，详见下方[抓取 statsig 指纹](#抓取-statsig-指纹)。
+> - `x-statsig-id` 等反 bot 头由程序用纯 Go 实时生成，**无需手动配置**；程序启动时自动生成随机 seed 并通过内置动画指纹算法计算 HEX，每次启动自动刷新。如需手动指定浏览器真实值，可抓取 `statsig_seed` / `statsig_hex` 并填入配置，详见下方[抓取 statsig 指纹](#抓取-statsig-指纹)。
 
 ### 抓取 statsig 指纹
 
-程序内置纯 Go 生成 `x-statsig-id`，大多数场景无需额外配置。**推荐**启用 `statsig_from_html = true`，程序会自动抓取 grok.com HTML 种子并结合内置 SVG 路径表生成 HEX，无需手动干预。如频繁触发反 bot 检测且未启用自动模式，可使用仓库提供的浏览器脚本抓取**真实**的 `statsig_seed` 和 `statsig_hex` 填入配置。
+程序内置纯 Go 自动生成 `x-statsig-id`（启动时创建随机 seed，通过 CSS 动画指纹算法计算 HEX），**大多数场景无需额外配置**。
+
+如果 grok 频繁返回 `code:7`（anti-bot 拒绝），说明当前 seed/HEX 对可能被标记。程序会自动尝试 `RotatePair()` 刷新。如仍失败，可手动抓取浏览器真实值：
 
 **步骤：**
 
 1. 打开 [grok.com](https://grok.com) 并登录
 2. 按 `F12` → **Console**（控制台）
-3. 复制 `capture_statsig_pair.js` 的**全部内容**，粘贴到控制台并按 Enter 执行
-4. 页面顶部出现绿色提示条后，按 **F5** 刷新页面
-5. 在 Grok 页面**发送一条消息**
-6. 绿色提示条会显示 `SEED=...` 和 `HEX=...`，例如：
+3. 粘贴并执行以下脚本：
 
-```
-✅ DONE
-
-SEED=abc123def456
-
-HEX =0123456789abcdef
-
-── config.toml ──
-[proxy.clearance]
-statsig_seed = "abc123def456"
-statsig_hex  = "0123456789abcdef"
+```javascript
+(()=>{const o=crypto.subtle.digest.bind(crypto.subtle);crypto.subtle.digest=function(a,d){const s=new TextDecoder().decode(new Uint8Array(d.buffer||d)),i=s.indexOf('obfiowerehiring');if(i>=0)console.log('SEED=',document.querySelector('meta[name="grok-site―verification"]').content,'\nHEX=',s.slice(i+15));return o(a,d);};})();
 ```
 
-7. 将 `SEED` 和 `HEX` 填入 `data/config.toml`：
+4. 在 Grok 页面**发送一条消息**
+5. 控制台会输出 `SEED=...` 和 `HEX=...`
+6. 将 `SEED` 和 `HEX` 填入 `data/config.toml`：
 
 ```toml
 [proxy.clearance]
@@ -229,9 +227,9 @@ proxy_url = ""                  # 出站代理（留空直连），HTTP/HTTPS/SO
 [proxy.clearance]
 cf_cookies = ""                 # 手动模式：浏览器 Cookie 串（含 cf_clearance）
 user_agent = "..."              # 需与抓取 Cookie 时的 UA 一致
-statsig_seed = ""               # 可选：真实 statsig 种子（抓取方法见「抓取 statsig 指纹」章节）
-statsig_hex  = ""               # 可选：真实 statsig HEX 指纹
-statsig_from_html = false       # 推荐：启用后自动从 grok.com HTML 种子 + 内置 SVG 路径表生成 HEX
+statsig_seed = ""               # 可选：手动覆盖自动 statsig 种子
+statsig_hex  = ""               # 可选：手动覆盖自动 statsig HEX 指纹
+statsig_from_html = false       # 已弃用：程序现已内置纯 Go 自动生成功能
 
 [retry]
 max_retries = 1                 # 换账号重试最大次数（0 = 不重试）
