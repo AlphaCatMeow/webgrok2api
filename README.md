@@ -138,31 +138,52 @@ print(message.content[0].text)
 
 ## 配置反爬绕过（重要）
 
-Grok 有 Cloudflare + 自研反爬机制。要正常调用，最关键的是从浏览器抓取 `cf_clearance` Cookie：
+Grok 有 Cloudflare + 自研反爬机制。要正常调用，需要从浏览器抓取两组凭证：
+
+### 第一步：抓取 Cloudflare 凭证
 
 1. 打开 [grok.com](https://grok.com)（已登录），F12 → **Network**
 2. 在 Grok 页面随便发一条消息
 3. 找到 `conversations/new` 请求 → **Headers** → **Cookie**
-4. 复制以下字段到 `data/config.toml`：
+4. 复制 `cf_clearance` 和 `__cf_bm` 的值
+
+### 第二步：抓取 grok 会话令牌
+
+`x-anonuserid`、`x-challenge`、`x-signature`、`x-userid` 是 grok 服务器通过 `Set-Cookie` 响应头下发的会话令牌，**不是客户端生成的**。它们与 `cf_clearance` 必须来自同一个浏览器会话。
+
+**抓取方法：**
+
+1. 浏览器打开 [grok.com](https://grok.com) 并登录
+2. F12 → **Application**（应用程序）标签页
+3. 左侧 **Cookies** → `https://grok.com`
+4. 依次找到并复制以下 4 个 Cookie 的值：
+   - `x-anonuserid` — 匿名用户 UUID（首次访问时服务器自动下发）
+   - `x-userid` — 登录用户 UUID
+   - `x-challenge` — grok proof-of-work 挑战令牌（较长的 base64 字符串）
+   - `x-signature` — 对 challenge 的签名（较短的 base64 字符串）
+
+> **注意**：这 4 个令牌是**服务器绑定的会话凭证**，过期后无法客户端续期，必须重新登录获取。
+
+### 第三步：填写配置
+
+将抓取的值填入 `data/config.toml`：
 
 ```toml
 [proxy.clearance]
-# 浏览器中抓取的完整 Cookie（含 cf_clearance、x-anonuserid、x-challenge、x-signature、x-userid）
-cf_cookies = "cf_clearance=...; x-anonuserid=...; x-challenge=...; x-signature=...; x-userid=..."
+# 整段 Cookie 也可以直接粘贴（程序会自动提取所需部分）
+cf_cookies = "cf_clearance=...; __cf_bm=..."
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-# 以下字段从浏览器 Cookie 中单独提取（程序也会从 cf_cookies 自动提取，但显式配置更可靠）
-x_anonuserid = "717688f6-..."
-x_challenge = "Zb6xK8xUxi..."
-x_signature = "5H1cUg2b..."
-x_userid = "2a0af403-..."
+# 从浏览器 Cookies 中逐个复制
+x_anonuserid = "717688f6-ea07-4d30-ba7c-af3626e8ab78"
+x_userid = "2a0af403-875b-4f0f-b5d7-c77171a14fd2"
+x_challenge = "Zb6xK8xUxi%2BSOyI7k%2FGZz6beN7VuzJh3hsUWaHoxzLhEb5Jg1eq3T25zgU527pDEFDSukZPsH0Gn%2FBgYC4yK2K..."
+x_signature = "5H1cUg2b%2BAJJCeV7jA%2BnumHP4s3i4ercMPLv6OlDuvl1gd12J1Zc3Q%2FXcd7OQ0%2FSaB9upVHGQigfMdc%2BjyZAuQ%3D%3D"
 ```
 
 > **提示**
 > - `cf_clearance` 有效期通常几小时到一天，过期后需重新抓取，否则会返回 403。
-> - `x-challenge` / `x-signature` / `x-anonuserid` / `x-userid` 是 grok 内部匿名会话的 anti-bot 令牌，**必须与 `cf_clearance` 来自同一浏览器会话**。
+> - `x-challenge` / `x-signature` / `x-anonuserid` / `x-userid` 是 grok 内部匿名会话的 anti-bot 令牌，**必须与 `cf_clearance` 来自同一浏览器会话**。如果你更新了其中一个，建议全部重新导出。
 > - `x-statsig-id` 反 bot 头由纯 Go 实时自动生成（启动时自动创建随机 seed + 内置 HEX 算法），**无需手动配置**。如果被 grok 拒绝（code:7），可调用 `RotatePair()` 刷新。
-> - 把整段 Cookie 头都放进 `cf_cookies` 即可，程序会自动提取所需部分。
-> - `x-statsig-id` 等反 bot 头由程序用纯 Go 实时生成，**无需手动配置**；程序启动时自动生成随机 seed 并通过内置动画指纹算法计算 HEX，每次启动自动刷新。如需手动指定浏览器真实值，可抓取 `statsig_seed` / `statsig_hex` 并填入配置，详见下方[抓取 statsig 指纹](#抓取-statsig-指纹)。
 
 ### 抓取 statsig 指纹
 
