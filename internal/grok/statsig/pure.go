@@ -63,10 +63,21 @@ var (
 )
 
 func init() {
-	seed := freshSeed()
+	// Use a known genuine (seed, HEX) pair captured from the live browser.
+	// Random generation via freshSeed() produces invalid statsig because
+	// DefaultSVGPaths are out of date with the current grok build.
+	// Update this pair when grok rotates its anti-bot assets.
+	genuineSeed := "t2ODAFY4ozXd0K2Y8MdI2XfxTDiJoakZPuoaKfcQn8VuasZMcKliyhA1pJ+o1oMf"
+	genuineHEX := "3bab9506b851eb851eb840e8f5c28f5c28f80e8f5c28f5c28f806b851eb851eb8400"
+	seed, err := decodeSeed(genuineSeed)
+	if err != nil || len(seed) != 48 {
+		// Fallback to random if decode fails
+		seed = freshSeed()
+		genuineHEX = freshHEX(seed)
+	}
 	mu.Lock()
 	curSeed = seed
-	curHEX = freshHEX(seed)
+	curHEX = genuineHEX
 	mu.Unlock()
 }
 

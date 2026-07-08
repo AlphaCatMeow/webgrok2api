@@ -315,6 +315,7 @@ func BuildHTTPHeaders(ssoToken string, contentType, origin, referer, reqURL, met
 	h := http.Header{}
 	h.Set("Content-Type", contentType)
 	h.Set("User-Agent", ua)
+	h.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 	h.Set("x-statsig-id", statsigID(pathOf(reqURL), method))
 	cookie := BuildSSOCookie(ssoToken, profile)
 	h.Set("Cookie", cookie)
