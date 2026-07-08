@@ -122,14 +122,22 @@ func (s *Server) handleImageGenerations(c *gin.Context) {
 		n = maxN
 	}
 
+	apiToken, _ := c.Get("api_token")
+	ssoToken, _ := apiToken.(string)
+
 	prompt := "Drawing: " + req.Prompt
-	imageURLs := s.captureLiteImageBatch(c.Request, spec, prompt, n)
+	imageURLs, genErr := s.captureLiteImageBatch(c.Request, spec, prompt, n, ssoToken)
+
+	if len(imageURLs) == 0 && genErr != nil {
+		writeAppError(c, genErr)
+		return
+	}
 
 	out := []map[string]any{}
 	for i := 0; i < n && i < len(imageURLs); i++ {
 		url := imageURLs[i]
 		if responseFormat == "b64_json" {
-			b64, err := fetchImageBase64(url)
+			b64, err := s.fetchImageBase64ViaTransport(url)
 			if err == nil {
 				out = append(out, map[string]any{"b64_json": b64})
 				continue
@@ -200,7 +208,7 @@ func (s *Server) handleWSImageGenerations(c *gin.Context, spec *model.Spec, prom
 			if img.blob != "" {
 				out = append(out, map[string]any{"b64_json": img.blob})
 			} else if img.url != "" {
-				b64, err := fetchImageBase64(img.url)
+				b64, err := s.fetchImageBase64ViaTransport(img.url)
 				if err == nil {
 					out = append(out, map[string]any{"b64_json": b64})
 					continue
@@ -266,15 +274,18 @@ func (s *Server) handleImageEdits(c *gin.Context) {
 			"image_url": map[string]any{"url": dataURI},
 		})
 	}
+	apiToken, _ := c.Get("api_token")
+	ssoToken, _ := apiToken.(string)
+
 	messages := []map[string]any{{"role": "user", "content": contentBlocks}}
 	chatReq := &chatCompletionRequest{Model: modelName, Messages: messages}
 	streamOff := false
 	chatReq.Stream = &streamOff
-	imageURLs := s.captureImageURLs(c.Request, chatReq, spec)
+	imageURLs, _ := s.captureImageURLs(c.Request, chatReq, spec, ssoToken)
 	out := []map[string]any{}
 	for _, url := range imageURLs {
 		if responseFormat == "b64_json" {
-			b64, err := fetchImageBase64(url)
+			b64, err := s.fetchImageBase64ViaTransport(url)
 			if err == nil {
 				out = append(out, map[string]any{"b64_json": b64})
 				continue
@@ -285,59 +296,138 @@ func (s *Server) handleImageEdits(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"created": time.Now().Unix(), "data": out})
 }
 
-// captureImageURLs runs the non-streaming chat path and extracts any image URLs.
-func (s *Server) captureImageURLs(r *http.Request, req *chatCompletionRequest, spec *model.Spec) []string {
-	cw := &captureWriter{}
-
-	lease, _ := reserveAccount(r.Context(), s.Directory, spec, nil)
-	if lease == nil {
-		return nil
-	}
-	defer s.Directory.Release(lease)
-
-	emitThink := resolveEmitThink(req.ReasoningEffort)
+// captureImageURLs runs the STREAMING chat path (same as /v1/chat/completions)
+// and extracts any image URLs from the response. Using the streaming path is
+// more reliable because grok's non-streaming responses sometimes omit the
+// image URL even when progress reaches 100%.
+// ssoToken is the Bearer token from the request, used as fallback when the pool is empty.
+func (s *Server) captureImageURLs(r *http.Request, req *chatCompletionRequest, spec *model.Spec, ssoToken string) ([]string, error) {
 	message, fileInputs, perr := extractMessages(req.Messages)
 	if perr != nil {
-		return nil
-	}
-	temp := 0.8
-	if req.Temperature != nil {
-		temp = *req.Temperature
-	}
-	topP := 0.95
-	if req.TopP != nil {
-		topP = *req.TopP
-	}
-	err := s.runGrokChatOnce(cw, r, lease, spec, message, fileInputs, temp, topP, emitThink, false, req.Model)
-	if err != nil {
-		return nil
+		return nil, perr
 	}
 
-	var obj map[string]any
-	if err := json.Unmarshal(cw.body, &obj); err != nil {
-		return nil
+	maxRetries := selectionMaxRetries()
+	exclude := []string{}
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		lease, _ := reserveAccount(r.Context(), s.Directory, spec, exclude)
+		if lease == nil {
+			if s.Refresh != nil {
+				_ = s.Refresh.RefreshOnDemand(r.Context())
+				lease, _ = reserveAccount(r.Context(), s.Directory, spec, exclude)
+			}
+		}
+		if lease == nil && ssoToken != "" {
+			lease = &account.Lease{Token: ssoToken, ModeID: int(spec.ModeId)}
+		}
+		if lease == nil {
+			return nil, platform.RateLimitError("No available accounts")
+		}
+
+		urls, err := s.captureImageURLsOnce(r, lease, spec, message, fileInputs)
+		s.Directory.Release(lease)
+
+		if err != nil {
+			lastErr = err
+			if attempt < maxRetries {
+				exclude = append(exclude, lease.Token)
+			}
+			continue
+		}
+		if len(urls) > 0 {
+			return urls, nil
+		}
+
+		// Got a valid response but no image URLs — retry with a different account.
+		if attempt < maxRetries {
+			exclude = append(exclude, lease.Token)
+		}
 	}
-	choices, _ := obj["choices"].([]any)
-	if len(choices) == 0 {
-		return nil
+
+	if lastErr != nil {
+		return nil, lastErr
 	}
-	choice, _ := choices[0].(map[string]any)
-	msg, _ := choice["message"].(map[string]any)
-	if msg == nil {
-		return nil
+	return nil, platform.UpstreamError("Image generation completed but no image URL was returned (may be rate-limited or moderated)", 502, "")
+}
+
+// captureImageURLsOnce executes one streaming chat attempt and collects image URLs.
+func (s *Server) captureImageURLsOnce(r *http.Request, lease *account.Lease, spec *model.Spec, message string, fileInputs []string) ([]string, error) {
+	payload := grok.BuildChatPayload(message, model.ModeId(lease.ModeID), fileInputs, nil, nil, nil)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, platform.UpstreamError("encode payload: "+err.Error(), 500, "")
 	}
-	text, _ := msg["content"].(string)
-	return extractImageURLsFromMarkdown(text)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	bodyReader, err := s.Transport.PostStream(ctx, grok.Chat, lease.Token, body)
+	if err != nil {
+		return nil, err
+	}
+	defer bodyReader.Close()
+
+	adapter := grok.NewStreamAdapter()
+	var imageURLs []string
+
+	scanner := bufio.NewScanner(bodyReader)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		kind, data := grok.ClassifyLine(line)
+		if kind == "done" {
+			break
+		}
+		if kind != "data" {
+			continue
+		}
+		events, _ := adapter.Feed([]byte(data))
+		for _, ev := range events {
+			if ev.Kind == grok.EventImage && ev.Content != "" {
+				url := ev.Content
+				if !strings.HasPrefix(url, "http") {
+					url = grok.ImageBaseURL + strings.TrimPrefix(url, "/")
+				}
+				imageURLs = append(imageURLs, url)
+			}
+		}
+	}
+
+	// Also collect any URLs from the adapter's ImageURLs accumulator.
+	for _, pair := range adapter.ImageURLs {
+		url := pair[0]
+		if url != "" {
+			found := false
+			for _, existing := range imageURLs {
+				if existing == url {
+					found = true
+					break
+				}
+			}
+			if !found {
+				if !strings.HasPrefix(url, "http") {
+					url = grok.ImageBaseURL + strings.TrimPrefix(url, "/")
+				}
+				imageURLs = append(imageURLs, url)
+			}
+		}
+	}
+
+	return imageURLs, nil
 }
 
 // captureLiteImageBatch runs N concurrent chat-based image generation
-// requests and returns all collected image URLs.
-func (s *Server) captureLiteImageBatch(r *http.Request, spec *model.Spec, prompt string, n int) []string {
+// requests and returns all collected image URLs and any error.
+func (s *Server) captureLiteImageBatch(r *http.Request, spec *model.Spec, prompt string, n int, ssoToken string) ([]string, error) {
 	if n <= 0 {
 		n = 1
 	}
 	results := make([]string, n)
 	var wg sync.WaitGroup
+	var firstErr error
+	var errMu sync.Mutex
 
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -348,9 +438,16 @@ func (s *Server) captureLiteImageBatch(r *http.Request, spec *model.Spec, prompt
 				Model:    spec.ModelName,
 				Messages: msgs,
 			}
-			urls := s.captureImageURLs(r, chatReq, spec)
+			urls, err := s.captureImageURLs(r, chatReq, spec, ssoToken)
 			if len(urls) > 0 {
 				results[idx] = urls[0]
+			}
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				errMu.Unlock()
 			}
 		}(i)
 	}
@@ -363,7 +460,10 @@ func (s *Server) captureLiteImageBatch(r *http.Request, spec *model.Spec, prompt
 			out = append(out, u)
 		}
 	}
-	return out
+	if len(out) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return out, nil
 }
 
 // extractImageURLsFromMarkdown returns URLs found in markdown image syntax.
@@ -389,6 +489,24 @@ func fetchImageBase64(url string) (string, error) {
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(body), nil
+}
+
+// fetchImageBase64ViaTransport downloads the image bytes via the authenticated
+// Transport (carries cf_clearance and grok session cookies), then returns the
+// base64 encoding. This is needed for assets.grok.com URLs that require auth.
+func (s *Server) fetchImageBase64ViaTransport(url string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	bodyReader, err := s.Transport.GetBytes(ctx, url, "")
+	if err != nil {
+		return "", err
+	}
+	defer bodyReader.Close()
+	body, err := io.ReadAll(io.LimitReader(bodyReader, 50<<20))
 	if err != nil {
 		return "", err
 	}
