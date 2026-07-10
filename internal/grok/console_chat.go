@@ -10,6 +10,11 @@ import (
 // ConsoleModels maps the public model name → the console.x.ai model field.
 // Mirrors xai_console_chat.py CONSOLE_MODELS.
 var ConsoleModels = map[string]string{
+	"grok-4.5-console":                     "grok-4.5",
+	"grok-4.5-low":                         "grok-4.5",
+	"grok-4.5-medium":                      "grok-4.5",
+	"grok-4.5-high":                        "grok-4.5",
+	"grok-4.5-xhigh":                       "grok-4.5",
 	"grok-4.3-console":                     "grok-4.3",
 	"grok-4.3-low":                         "grok-4.3",
 	"grok-4.3-medium":                      "grok-4.3",
@@ -28,6 +33,7 @@ var ConsoleModels = map[string]string{
 // Models requiring a reasoning field in the payload.
 var modelsWithReasoningField = map[string]struct{}{
 	"grok-4.3":                   {},
+	"grok-4.5":                   {},
 	"grok-4.20-multi-agent-0309": {},
 }
 
@@ -36,6 +42,10 @@ var modelFixedEffort = map[string]string{
 	"grok-4.3-low":                 "low",
 	"grok-4.3-medium":              "medium",
 	"grok-4.3-high":                "high",
+	"grok-4.5-low":                 "low",
+	"grok-4.5-medium":              "medium",
+	"grok-4.5-high":                "high",
+	"grok-4.5-xhigh":               "xhigh",
 	"grok-4.20-multi-agent-low":    "low",
 	"grok-4.20-multi-agent-medium": "medium",
 	"grok-4.20-multi-agent-high":   "high",
@@ -46,10 +56,12 @@ var modelFixedEffort = map[string]string{
 var modelMaxOutputTokens = map[string]int{
 	"grok-4.20-multi-agent-0309": 2_000_000,
 	"grok-build-0.1":             256_000,
+	"grok-4.5":                   2_000_000,
 }
 
 // Models supporting web_search / x_search tools.
 var modelsWithSearchTools = map[string]struct{}{
+	"grok-4.5":                     {},
 	"grok-4.20-multi-agent-0309":   {},
 	"grok-4.20-0309":               {},
 	"grok-4.20-0309-reasoning":     {},

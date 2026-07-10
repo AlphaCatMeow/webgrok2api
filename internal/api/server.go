@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,6 +23,7 @@ type Server struct {
 	Refresh   *account.RefreshService
 	Transport *grok.Transport
 	Media     *storage.LocalMediaCacheStore
+	ConvTracker *grok.ConversationTracker
 }
 
 // NewServer constructs a Server bound to the given dependencies.
@@ -32,6 +34,7 @@ func NewServer(repo account.Repository, dir *account.Directory, refresh *account
 		Refresh:   refresh,
 		Transport: transport,
 		Media:     media,
+		ConvTracker: grok.NewConversationTracker(10 * time.Minute),
 	}
 }
 

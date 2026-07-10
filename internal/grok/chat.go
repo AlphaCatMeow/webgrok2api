@@ -57,15 +57,15 @@ func BuildChatPayload(message string, modeID model.ModeId, fileAttachments []str
 	}
 
 	payload := map[string]any{
-		"collectionIds": []any{},
-		"connectors":    []any{},
+		"collectionIds":             []any{},
+		"disabledConnectorIds":      []any{},
 		"deviceEnvInfo": map[string]any{
 			"darkModeEnabled":  false,
-			"devicePixelRatio": 2,
-			"screenHeight":     1329,
-			"screenWidth":      2056,
-			"viewportHeight":   1083,
-			"viewportWidth":    2056,
+			"devicePixelRatio": 1,
+			"screenHeight":     1080,
+			"screenWidth":      1920,
+			"viewportHeight":   945,
+			"viewportWidth":    1920,
 		},
 		"disableMemory":               !memory,
 		"disableSearch":               false,
@@ -103,6 +103,15 @@ func BuildChatPayload(message string, modeID model.ModeId, fileAttachments []str
 		payload[k] = v
 	}
 	return payload
+}
+
+// BuildResponsePayload constructs the JSON payload for POST /rest/app-chat/conversations/{id}/responses.
+// Unlike BuildChatPayload, this sends a follow-up message in an existing conversation
+// and requires responseId pointing to the parent message to reply to.
+func BuildResponsePayload(message string, responseID string, modeID model.ModeId, fileAttachments []string, toolOverrides map[string]any, requestOverrides map[string]any) map[string]any {
+	base := BuildChatPayload(message, modeID, fileAttachments, toolOverrides, nil, requestOverrides)
+	base["responseId"] = responseID
+	return base
 }
 
 // ClassifyLine parses a raw SSE line and returns (kind, data).
@@ -189,6 +198,10 @@ type StreamAdapter struct {
 	ThinkingBuf       []string
 	TextBuf           []string
 	ImageURLs         [][2]string // [(url, imageUuid), ...]
+
+	// Conversation tracking — populated from the first frames of conversations/new.
+	ConversationID string
+	LastResponseID string // userResponse.responseId from the current message
 }
 
 type citationRef struct {
@@ -223,9 +236,25 @@ func (s *StreamAdapter) Feed(data []byte) ([]FrameEvent, *platform.AppError) {
 	if result == nil {
 		return nil, nil
 	}
+
+	// Frame 1: conversation creation (only on conversations/new).
+	if conv, _ := result["conversation"].(map[string]any); conv != nil {
+		if cid, _ := conv["conversationId"].(string); cid != "" {
+			s.ConversationID = cid
+		}
+		return nil, nil
+	}
+
 	resp, _ := result["response"].(map[string]any)
 	if resp == nil {
 		return nil, nil
+	}
+
+	// Frame 2: user response echo — capture responseId for conversation tracking.
+	if userResp, _ := resp["userResponse"].(map[string]any); userResp != nil {
+		if rid, _ := userResp["responseId"].(string); rid != "" {
+			s.LastResponseID = rid
+		}
 	}
 
 	events := []FrameEvent{}

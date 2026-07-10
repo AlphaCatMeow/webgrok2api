@@ -206,6 +206,11 @@ var allModels = []Spec{
 	{ModelName: "grok-imagine-image-edit", ModeId: ModeAuto, Tier: TierSuper, Capability: CapImageEdit, Enabled: true, PublicName: "Grok Imagine Image Edit"},
 	{ModelName: "grok-imagine-video", ModeId: ModeAuto, Tier: TierSuper, Capability: CapVideo, Enabled: true, PublicName: "Grok Imagine Video"},
 	// --- console.x.ai chat (basic, free) ---
+	{ModelName: "grok-4.5-console", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.5 (Console)"},
+	{ModelName: "grok-4.5-low", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.5 Low Thinking"},
+	{ModelName: "grok-4.5-medium", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.5 Medium Thinking"},
+	{ModelName: "grok-4.5-high", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.5 High Thinking"},
+	{ModelName: "grok-4.5-xhigh", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.5 XHigh Thinking"},
 	{ModelName: "grok-4.3-console", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.3 (Console)"},
 	{ModelName: "grok-4.3-low", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.3 Low Thinking"},
 	{ModelName: "grok-4.3-medium", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.3 Medium Thinking"},

@@ -28,6 +28,15 @@ const (
 	AcceptTOSURL = AccountsBase + "/auth_mgmt.AuthManagement/SetTosAcceptedVersion"
 	NSFWMgmtURL  = Base + "/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
 
+	// Conversation follow-up (SSE streaming, subsequent messages).
+	// First message uses Chat (conversations/new); follow-ups use Responses.
+	Responses     = Base + "/rest/app-chat/conversations/%s/responses"
+	LoadResponses = Base + "/rest/app-chat/conversations/%s/load-responses"
+	ResponseNode  = Base + "/rest/app-chat/conversations/%s/response-node"
+	StopInflight  = Base + "/rest/app-chat/conversations/%s/stop-inflight-responses"
+	ConversationV2 = Base + "/rest/app-chat/conversations_v2/%s"
+	Conversation   = Base + "/rest/app-chat/conversations/%s"
+
 	// Auth REST.
 	SetBirthURL = Base + "/rest/auth/set-birth-date"
 
@@ -39,6 +48,13 @@ const (
 	// Console API (console.x.ai).
 	ConsoleResponses = ConsoleBase + "/v1/responses"
 	ConsoleChat       = ConsoleBase + "/v1/chat/completions"
+
+	// Console gRPC-Web endpoints (auth_mgmt, billing).
+	ConsoleListApiKeys       = ConsoleBase + "/auth_mgmt.AuthManagement/ListApiKeys"
+	ConsoleListModelsForTeam = ConsoleBase + "/auth_mgmt.AuthManagement/ListModelsForTeam"
+	ConsoleGetTeam           = ConsoleBase + "/auth_mgmt.AuthManagement/GetTeam"
+	ConsoleGetSpendingLimits = ConsoleBase + "/prod_mc_billing.UISvc/GetSpendingLimits"
+	ConsoleListBalanceChanges = ConsoleBase + "/prod_mc_billing.UISvc/ListPrepaidBalanceChanges"
 )
 
 // DefaultUserAgent is the Chrome UA used when no cf_clearance profile is set.

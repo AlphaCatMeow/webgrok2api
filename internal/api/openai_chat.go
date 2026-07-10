@@ -144,8 +144,27 @@ func (s *Server) runGrokChatWithRetry(c *gin.Context, req *chatCompletionRequest
 }
 
 // runGrokChatOnce executes one chat attempt against grok.com.
+// For follow-up messages it uses /responses endpoint with conversation tracking.
 func (s *Server) runGrokChatOnce(w http.ResponseWriter, r *http.Request, lease *account.Lease, spec *model.Spec, message string, fileInputs []string, temp, topP float64, emitThink, stream bool, modelName string) error {
-	payload := grok.BuildChatPayload(message, model.ModeId(lease.ModeID), fileInputs, nil, nil, nil)
+	// Check if we have an active conversation for this token.
+	convCtx := s.ConvTracker.Get(lease.Token)
+	var (
+		payload    map[string]any
+		targetURL  string
+		isNew      bool
+	)
+	if convCtx != nil && convCtx.ConversationID != "" && convCtx.LastResponseID != "" {
+		// Follow-up message in existing conversation.
+		payload = grok.BuildResponsePayload(message, convCtx.LastResponseID, model.ModeId(lease.ModeID), fileInputs, nil, nil)
+		targetURL = fmt.Sprintf(grok.Responses, convCtx.ConversationID)
+		isNew = false
+	} else {
+		// First message — create new conversation.
+		payload = grok.BuildChatPayload(message, model.ModeId(lease.ModeID), fileInputs, nil, nil, nil)
+		targetURL = grok.Chat
+		isNew = true
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return platform.UpstreamError("encode chat payload: "+err.Error(), 500, "")
@@ -154,8 +173,11 @@ func (s *Server) runGrokChatOnce(w http.ResponseWriter, r *http.Request, lease *
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	bodyReader, err := s.Transport.PostStream(ctx, grok.Chat, lease.Token, body)
+	bodyReader, err := s.Transport.PostStream(ctx, targetURL, lease.Token, body)
 	if err != nil {
+		// If responses endpoint fails, clear the conversation and fall back to
+		// creating a new one on the next attempt.
+		s.ConvTracker.Clear(lease.Token)
 		return err
 	}
 	defer bodyReader.Close()
@@ -217,6 +239,10 @@ func (s *Server) runGrokChatOnce(w http.ResponseWriter, r *http.Request, lease *
 		finalChunk := makeStreamChunk(completionID, created, modelName, "", "", true)
 		sw.writeJSONData(finalChunk)
 		sw.writeDone()
+		// Save conversation context for follow-up messages.
+		if isNew && adapter.ConversationID != "" && adapter.LastResponseID != "" {
+			s.ConvTracker.Set(lease.Token, adapter.ConversationID, adapter.LastResponseID)
+		}
 		return nil
 	}
 
@@ -269,6 +295,10 @@ func (s *Server) runGrokChatOnce(w http.ResponseWriter, r *http.Request, lease *
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(b)
+	// Save conversation context for follow-up messages.
+	if isNew && adapter.ConversationID != "" && adapter.LastResponseID != "" {
+		s.ConvTracker.Set(lease.Token, adapter.ConversationID, adapter.LastResponseID)
+	}
 	return nil
 }
 
