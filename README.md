@@ -106,6 +106,30 @@ curl http://localhost:8000/v1/chat/completions \
 ```
 
 > **鉴权规则**：默认 `api_key` 为空，完全开放。配置 `api_key` 后，请求必须携带匹配的 API Key 或任意 SSO Token。
+>
+> **Console SSO / DPoP**：`*-console` 模型会自动使用 SSO Cookie 向 `console.x.ai/v1/dpop/token` 交换短期 DPoP token，并为每个资源请求生成 ES256 proof。客户端仍只需传普通 SSO Token，不需要自行生成 DPoP。
+
+### Console Image / Video
+
+Console 标准资源模型：
+
+- `grok-imagine-image-console`：图片生成、图片编辑，对应上游 `grok-imagine-image`
+- `grok-imagine-image-quality-console`：高质量图片生成、图片编辑，对应上游 `grok-imagine-image-quality`
+- `grok-imagine-video-console`：异步视频生成，对应上游 `grok-imagine-video`
+
+```bash
+curl http://localhost:8000/v1/images/generations \
+  -H "Authorization: Bearer 你的sso-token" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"grok-imagine-image-console","prompt":"a red panda","size":"1024x1024","n":1}'
+
+curl http://localhost:8000/v1/videos \
+  -H "Authorization: Bearer 你的sso-token" \
+  -F "model=grok-imagine-video-console" \
+  -F "prompt=a red panda running" \
+  -F "seconds=6" \
+  -F "size=1280x720"
+```
 
 ### 对接 OpenAI SDK
 
@@ -306,9 +330,9 @@ timeout = 60                    # NSFW 设置超时（秒）
 
 **grok.com 聊天**：`grok-4.20-0309`、`grok-4.20-0309-reasoning`、`grok-4.20-heavy`、`grok-4.20-multi-agent-0309` 等 16 个模型
 
-**Console**：`grok-4.3-console`、`grok-4.3-high`、`grok-4.20-multi-agent-xhigh`、`grok-4.20-0309-non-reasoning-console`、`grok-build-console` 等 13 个模型（通过 console.x.ai，免费额度）
+**Console**：`grok-4.3-console`、`grok-4.3-high`、`grok-4.20-multi-agent-xhigh`、`grok-4.20-0309-non-reasoning-console`、`grok-build-console` 等对话模型（通过 console.x.ai，自动使用 DPoP）
 
-**媒体**：`grok-imagine-image-lite`、`grok-imagine-image`、`grok-imagine-image-pro`（WebSocket 实时生成）、`grok-imagine-image-edit`、`grok-imagine-video`
+**媒体**：Web 路径提供 `grok-imagine-image-lite`、`grok-imagine-image`、`grok-imagine-image-pro`（WebSocket 实时生成）、`grok-imagine-image-edit`、`grok-imagine-video`；Console DPoP 路径另提供 `grok-imagine-image-console`、`grok-imagine-image-quality-console`、`grok-imagine-video-console`
 
 完整模型列表见 [API.md](API.md)。
 

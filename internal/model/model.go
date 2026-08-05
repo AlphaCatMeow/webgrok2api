@@ -205,6 +205,10 @@ var allModels = []Spec{
 	{ModelName: "grok-imagine-image-pro", ModeId: ModeAuto, Tier: TierSuper, Capability: CapImage, Enabled: true, PublicName: "Grok Imagine Image Pro"},
 	{ModelName: "grok-imagine-image-edit", ModeId: ModeAuto, Tier: TierSuper, Capability: CapImageEdit, Enabled: true, PublicName: "Grok Imagine Image Edit"},
 	{ModelName: "grok-imagine-video", ModeId: ModeAuto, Tier: TierSuper, Capability: CapVideo, Enabled: true, PublicName: "Grok Imagine Video"},
+	// --- console.x.ai media (basic SSO, DPoP) ---
+	{ModelName: "grok-imagine-image-console", ModeId: ModeConsole, Tier: TierBasic, Capability: CapImage | CapImageEdit, Enabled: true, PublicName: "Grok Imagine Image (Console)"},
+	{ModelName: "grok-imagine-image-quality-console", ModeId: ModeConsole, Tier: TierBasic, Capability: CapImage | CapImageEdit, Enabled: true, PublicName: "Grok Imagine Image Quality (Console)"},
+	{ModelName: "grok-imagine-video-console", ModeId: ModeConsole, Tier: TierBasic, Capability: CapVideo, Enabled: true, PublicName: "Grok Imagine Video (Console)"},
 	// --- console.x.ai chat (basic, free) ---
 	{ModelName: "grok-4.5-console", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.5 (Console)"},
 	{ModelName: "grok-4.5-low", ModeId: ModeConsole, Tier: TierBasic, Capability: CapConsoleChat, Enabled: true, PublicName: "Grok 4.5 Low Thinking"},

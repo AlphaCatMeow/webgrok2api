@@ -341,7 +341,6 @@ func BuildConsoleHeaders(ssoToken string, contentType string, profile proxyProfi
 	h.Set("Accept", "*/*")
 	h.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 	h.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	h.Set("Authorization", "Bearer anonymous")
 	h.Set("Content-Type", contentType)
 	h.Set("Cookie", cookie)
 	h.Set("Origin", "https://console.x.ai")

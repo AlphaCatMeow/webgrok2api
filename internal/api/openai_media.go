@@ -87,6 +87,8 @@ func (s *Server) handleImageGenerations(c *gin.Context) {
 		N              int    `json:"n,omitempty"`
 		Size           string `json:"size,omitempty"`
 		ResponseFormat string `json:"response_format,omitempty"`
+		AspectRatio    string `json:"aspect_ratio,omitempty"`
+		Resolution     string `json:"resolution,omitempty"`
 	}
 	if err := readJSON(c, &req); err != nil {
 		writeAppError(c, err)
@@ -99,6 +101,10 @@ func (s *Server) handleImageGenerations(c *gin.Context) {
 	}
 	if !spec.IsImage() {
 		writeAppError(c, platform.ValidationErrorCode("Model '"+req.Model+"' is not an image model", "model", "invalid_model"))
+		return
+	}
+	if spec.ModeId == model.ModeConsole {
+		s.handleConsoleImageGeneration(c, spec, req.Prompt, req.N, req.Size, req.ResponseFormat, req.AspectRatio, req.Resolution)
 		return
 	}
 	n := req.N
@@ -241,6 +247,10 @@ func (s *Server) handleImageEdits(c *gin.Context) {
 	}
 	if !spec.IsImageEdit() {
 		writeAppError(c, platform.ValidationErrorCode("Model '"+modelName+"' is not an image-edit model", "model", "invalid_model"))
+		return
+	}
+	if spec.ModeId == model.ModeConsole {
+		s.handleConsoleImageEdit(c, spec, modelName, prompt)
 		return
 	}
 	responseFormat := strings.TrimSpace(c.Request.FormValue("response_format"))
@@ -516,6 +526,8 @@ func (s *Server) fetchImageBase64ViaTransport(url string) (string, error) {
 // --- Video jobs (async) ---
 
 type videoJob struct {
+	mu sync.RWMutex
+
 	ID          string `json:"id"`
 	Object      string `json:"object"`
 	CreatedAt   int64  `json:"created_at"`
@@ -537,7 +549,7 @@ type videoJob struct {
 
 var (
 	videoJobsMap   = map[string]*videoJob{}
-	videoJobsMutex sync.Mutex
+	videoJobsMutex sync.RWMutex
 )
 
 // handleVideoCreate queues an async video job.
@@ -563,10 +575,19 @@ func (s *Server) handleVideoCreate(c *gin.Context) {
 	}
 	seconds := 6
 	if v := c.Request.FormValue("seconds"); v != "" {
-		if n, err := parseIntStr(v); err == nil {
-			if isValidVideoLength(n) {
-				seconds = n
+		n, err := parseIntStr(v)
+		if err != nil {
+			writeAppError(c, platform.ValidationError("Invalid seconds", "seconds"))
+			return
+		}
+		if spec.ModeId == model.ModeConsole {
+			if n < 1 || n > 15 {
+				writeAppError(c, platform.ValidationError("Console video seconds must be between 1 and 15", "seconds"))
+				return
 			}
+			seconds = n
+		} else if isValidVideoLength(n) {
+			seconds = n
 		}
 	}
 	size := c.Request.FormValue("size")
@@ -587,7 +608,13 @@ func (s *Server) handleVideoCreate(c *gin.Context) {
 	}
 	registerVideoJob(job)
 
-	go s.runVideoJob(job, prompt, modelName, spec)
+	if spec.ModeId == model.ModeConsole {
+		apiToken, _ := c.Get("api_token")
+		ssoToken, _ := apiToken.(string)
+		go s.runConsoleVideoJob(job, prompt, spec, ssoToken)
+	} else {
+		go s.runVideoJob(job, prompt, modelName, spec)
+	}
 	c.JSON(http.StatusOK, job.toDict())
 }
 
@@ -601,13 +628,17 @@ func (s *Server) handleVideoGet(c *gin.Context) {
 	}
 	// Check if requesting content
 	if strings.HasSuffix(c.Request.URL.Path, "/content") {
-		if job.Status != "completed" || job.contentPath == "" {
+		job.mu.RLock()
+		status := job.Status
+		contentPath := job.contentPath
+		job.mu.RUnlock()
+		if status != "completed" || contentPath == "" {
 			writeAppError(c, platform.NewAppError("Video content is not ready yet", platform.ErrUpstream, "video_not_ready", http.StatusConflict))
 			return
 		}
 		c.Header("Content-Type", "video/mp4")
 		c.Header("Content-Disposition", `inline; filename="`+id+`.mp4"`)
-		c.File(job.contentPath)
+		c.File(contentPath)
 		return
 	}
 	c.JSON(http.StatusOK, job.toDict())
@@ -617,20 +648,16 @@ func (s *Server) handleVideoGet(c *gin.Context) {
 func (s *Server) runVideoJob(job *videoJob, prompt, modelName string, spec *model.Spec) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+	job.mu.Lock()
 	job.Status = "in_progress"
 	job.Progress = 1
+	job.mu.Unlock()
 	preset := "normal"
 	promptWithFlag := prompt + " --mode=normal"
 
 	lease, _ := reserveAccount(ctx, s.Directory, spec, nil)
 	if lease == nil {
-		now := time.Now().Unix()
-		job.Status = "failed"
-		job.CompletedAt = &now
-		job.Error = &struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		}{Code: "video_generation_failed", Message: "no available accounts"}
+		s.failVideoJob(job, "no available accounts")
 		return
 	}
 	defer s.Directory.Release(lease)
@@ -667,8 +694,12 @@ func (s *Server) runVideoJob(job *videoJob, prompt, modelName string, spec *mode
 		events, _ := adapter.Feed([]byte(data))
 		for _, ev := range events {
 			if ev.Kind == grok.EventImageProgress {
-				if n, err := parseIntStr(ev.Content); err == nil && n > job.Progress {
-					job.Progress = n
+				if n, err := parseIntStr(ev.Content); err == nil {
+					job.mu.Lock()
+					if n > job.Progress {
+						job.Progress = n
+					}
+					job.mu.Unlock()
 				}
 			}
 		}
@@ -676,10 +707,12 @@ func (s *Server) runVideoJob(job *videoJob, prompt, modelName string, spec *mode
 
 	if len(adapter.ImageURLs) > 0 {
 		now := time.Now().Unix()
+		job.mu.Lock()
 		job.Status = "completed"
 		job.Progress = 100
 		job.CompletedAt = &now
 		job.VideoURL = adapter.ImageURLs[0][0]
+		job.mu.Unlock()
 		return
 	}
 	s.failVideoJob(job, "no video URL in upstream response")
@@ -687,6 +720,8 @@ func (s *Server) runVideoJob(job *videoJob, prompt, modelName string, spec *mode
 
 func (s *Server) failVideoJob(job *videoJob, message string) {
 	now := time.Now().Unix()
+	job.mu.Lock()
+	defer job.mu.Unlock()
 	job.Status = "failed"
 	job.CompletedAt = &now
 	job.Error = &struct {
@@ -696,6 +731,8 @@ func (s *Server) failVideoJob(job *videoJob, message string) {
 }
 
 func (j *videoJob) toDict() map[string]any {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
 	m := map[string]any{
 		"id": j.ID, "object": j.Object, "created_at": j.CreatedAt,
 		"status": j.Status, "model": j.Model, "progress": j.Progress,
@@ -721,8 +758,8 @@ func registerVideoJob(job *videoJob) {
 }
 
 func lookupVideoJob(id string) *videoJob {
-	videoJobsMutex.Lock()
-	defer videoJobsMutex.Unlock()
+	videoJobsMutex.RLock()
+	defer videoJobsMutex.RUnlock()
 	return videoJobsMap[id]
 }
 

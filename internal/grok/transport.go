@@ -29,6 +29,10 @@ type Transport struct {
 	resetOn      map[int]struct{}
 	resetPending bool
 	extraCookies []*http.Cookie
+
+	dpopMu       sync.Mutex
+	dpopSessions map[string]dpopSession
+	dpopLoading  map[string]chan struct{}
 }
 
 // NewTransport builds a Transport from config.
@@ -47,8 +51,10 @@ func NewTransport() (*Transport, error) {
 		proxyURL = normalizeProxyURL(envProxy)
 	}
 	return &Transport{
-		proxyURL: proxyURL,
-		resetOn:  reset,
+		proxyURL:     proxyURL,
+		resetOn:      reset,
+		dpopSessions: map[string]dpopSession{},
+		dpopLoading:  map[string]chan struct{}{},
 	}, nil
 }
 
@@ -264,8 +270,44 @@ func (t *Transport) PostGRPCWeb(ctx context.Context, urlStr, token string, paylo
 
 // do builds standard *http.Request with headers, then sends via tlsclient.
 func (t *Transport) do(ctx context.Context, method, urlStr, token string, body io.Reader, o reqOpts) (*http.Response, error) {
+	if o.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.timeout)
+		defer cancel()
+	}
+
+	var payload []byte
+	var err error
+	if body != nil {
+		payload, err = io.ReadAll(body)
+		if err != nil {
+			return nil, platform.UpstreamError("read request body failed: "+err.Error(), 500, "")
+		}
+	}
+
+	attempts := 1
+	if o.consoleMode {
+		attempts = 2
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		resp, sessionToken, reqErr := t.doOnce(ctx, method, urlStr, token, payload, o)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		if !o.consoleMode || resp.StatusCode != http.StatusUnauthorized || attempt+1 >= attempts {
+			return resp, nil
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		t.invalidateDPoPSession(token, consoleRequestBase(urlStr), sessionToken)
+	}
+	return nil, platform.UpstreamError("Console DPoP retry state invalid", 502, "")
+}
+
+func (t *Transport) doOnce(ctx context.Context, method, urlStr, token string, payload []byte, o reqOpts) (*http.Response, string, error) {
 	profile := resolveProxyProfile()
 	var headers http.Header
+	var sessionToken string
 	if o.consoleMode {
 		headers = BuildConsoleHeaders(token, o.contentType, profile)
 	} else {
@@ -283,31 +325,41 @@ func (t *Transport) do(ctx context.Context, method, urlStr, token string, body i
 		headers.Del("Origin")
 	}
 
-	if o.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, o.timeout)
-		defer cancel()
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
 	}
-
 	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
 	if err != nil {
-		return nil, platform.UpstreamError("build request failed: "+err.Error(), 502, "")
+		return nil, "", platform.UpstreamError("build request failed: "+err.Error(), 502, "")
 	}
 	req.Header = headers
+	if o.consoleMode {
+		session, err := t.getDPoPSession(ctx, token, consoleRequestBase(urlStr), profile)
+		if err != nil {
+			return nil, "", err
+		}
+		if !strings.HasSuffix(req.URL.Path, "/responses") {
+			req.Header.Del("x-cluster")
+		}
+		if err := applyDPoPAuthorization(req, session); err != nil {
+			return nil, "", err
+		}
+		sessionToken = session.accessToken
+	}
 
 	client, err := t.ensureClient()
 	if err != nil {
-		return nil, platform.UpstreamError("transport init failed: "+err.Error(), 502, "")
+		return nil, "", platform.UpstreamError("transport init failed: "+err.Error(), 502, "")
 	}
-
 	resp, err := client.Do(req)
 	if err != nil {
 		t.mu.Lock()
 		t.resetPending = true
 		t.mu.Unlock()
-		return nil, platform.UpstreamError("transport request failed: "+err.Error(), 502, "")
+		return nil, "", platform.UpstreamError("transport request failed: "+err.Error(), 502, "")
 	}
-	return resp, nil
+	return resp, sessionToken, nil
 }
 
 // --- helpers ---------------------------------------------------------------

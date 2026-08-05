@@ -237,10 +237,12 @@ OpenAI-compatible image generation endpoint. Use this for `grok-imagine-image-li
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | **required** | `grok-imagine-image-lite` (HTTP), `grok-imagine-image` (WebSocket), or `grok-imagine-image-pro` (WebSocket). WebSocket models are recommended via `/v1/chat/completions` for real-time streaming. |
+| `model` | string | **required** | Web: `grok-imagine-image-lite`, `grok-imagine-image`, `grok-imagine-image-pro`; Console DPoP: `grok-imagine-image-console`, `grok-imagine-image-quality-console` |
 | `prompt` | string | **required** | Image description |
 | `n` | int | `1` | Number of images (max 4 for lite, 10 for others) |
-| `size` | string | — | Image dimensions |
+| `size` | string | — | Image dimensions; Console maps common sizes to aspect ratios |
+| `aspect_ratio` | string | — | Console: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, or `1:2` |
+| `resolution` | string | — | Console: `1k` or `2k` |
 | `response_format` | string | `"url"` | `"url"` or `"b64_json"` |
 
 #### Response
@@ -269,9 +271,11 @@ curl -X POST http://localhost:8000/v1/images/edits \
 
 | Field | Type | Description |
 |---|---|---|
-| `model` | string | **required** — must be `grok-imagine-image-edit` |
+| `model` | string | **required** — Web: `grok-imagine-image-edit`; Console DPoP: `grok-imagine-image-console` or `grok-imagine-image-quality-console` |
 | `prompt` | string | **required** — editing instruction |
-| `image[]` | file | **required** — one or more source images |
+| `image[]` | file | **required** — one or more source images; Console supports 1 to 3 |
+| `aspect_ratio` | string | — | Console aspect ratio |
+| `resolution` | string | — | Console: `1k` or `2k` |
 | `response_format` | string | `"url"` (default) or `"b64_json"` |
 
 ---
@@ -293,10 +297,10 @@ curl -X POST http://localhost:8000/v1/videos \
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | **required** | Must be `grok-imagine-video` |
+| `model` | string | **required** | Web: `grok-imagine-video`; Console DPoP: `grok-imagine-video-console` |
 | `prompt` | string | **required** | Video description |
-| `seconds` | int | `6` | Duration: 6, 10, 12, 16, or 20 |
-| `size` | string | `"720x1280"` | Video dimensions |
+| `seconds` | int | `6` | Duration: 6, 10, 12, 16, or 20; current Console route is intended for values accepted by upstream (normally up to 15 seconds) |
+| `size` | string | `"720x1280"` | Video dimensions; Console maps to `480p`/`720p` and `16:9`/`9:16` |
 
 #### Response
 
@@ -358,7 +362,7 @@ Get a single model by ID.
 | `grok-4.20-heavy` | heavy | heavy | PreferBest |
 | `grok-4.3-beta` | grok43 | super | Beta |
 
-#### Console Models (console.x.ai)
+#### Console Models (console.x.ai, DPoP)
 
 | Model | Thinking Level |
 |---|---|
@@ -382,6 +386,9 @@ Get a single model by ID.
 |---|---|---|
 | `grok-imagine-image-lite` | Image generation (basic) | HTTP (grok.com chat) |
 | `grok-imagine-image` | Image generation | WebSocket (real-time streaming) |
+| `grok-imagine-image-console` | Image generation and editing | Console standard Images API + DPoP |
+| `grok-imagine-image-quality-console` | Quality image generation and editing | Console standard Images API + DPoP |
+| `grok-imagine-video-console` | Async video generation | Console standard Videos API + DPoP |
 | `grok-imagine-image-pro` | Image generation (pro) | WebSocket (real-time streaming) |
 | `grok-imagine-image-edit` | Image editing | HTTP (grok.com chat) |
 | `grok-imagine-video` | Video generation | HTTP (grok.com chat) |

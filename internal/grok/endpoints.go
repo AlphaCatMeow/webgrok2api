@@ -16,10 +16,10 @@ const (
 	Chat = Base + "/rest/app-chat/conversations/new"
 
 	// Asset management.
-	AssetsUpload   = Base + "/rest/app-chat/upload-file"
-	AssetsListURL  = Base + "/rest/assets"
+	AssetsUpload    = Base + "/rest/app-chat/upload-file"
+	AssetsListURL   = Base + "/rest/assets"
 	AssetsDeleteURL = Base + "/rest/assets-metadata" // append /{asset_id}
-	AssetsDownload = AssetsCDN                       // GET /{path}
+	AssetsDownload  = AssetsCDN                      // GET /{path}
 
 	// Rate limits (usage / quota sync).
 	RateLimits = Base + "/rest/rate-limits"
@@ -30,10 +30,10 @@ const (
 
 	// Conversation follow-up (SSE streaming, subsequent messages).
 	// First message uses Chat (conversations/new); follow-ups use Responses.
-	Responses     = Base + "/rest/app-chat/conversations/%s/responses"
-	LoadResponses = Base + "/rest/app-chat/conversations/%s/load-responses"
-	ResponseNode  = Base + "/rest/app-chat/conversations/%s/response-node"
-	StopInflight  = Base + "/rest/app-chat/conversations/%s/stop-inflight-responses"
+	Responses      = Base + "/rest/app-chat/conversations/%s/responses"
+	LoadResponses  = Base + "/rest/app-chat/conversations/%s/load-responses"
+	ResponseNode   = Base + "/rest/app-chat/conversations/%s/response-node"
+	StopInflight   = Base + "/rest/app-chat/conversations/%s/stop-inflight-responses"
 	ConversationV2 = Base + "/rest/app-chat/conversations_v2/%s"
 	Conversation   = Base + "/rest/app-chat/conversations/%s"
 
@@ -41,19 +41,24 @@ const (
 	SetBirthURL = Base + "/rest/auth/set-birth-date"
 
 	// Media (video).
-	MediaPost      = Base + "/rest/media/post/create"
-	MediaPostLink  = Base + "/rest/media/post/create-link"
-	VideoUpscale   = Base + "/rest/media/video/upscale"
+	MediaPost     = Base + "/rest/media/post/create"
+	MediaPostLink = Base + "/rest/media/post/create-link"
+	VideoUpscale  = Base + "/rest/media/video/upscale"
 
-	// Console API (console.x.ai).
-	ConsoleResponses = ConsoleBase + "/v1/responses"
-	ConsoleChat       = ConsoleBase + "/v1/chat/completions"
+	// Console API (console.x.ai), authenticated with a DPoP-bound SSO session.
+	ConsoleResponses       = ConsoleBase + "/v1/responses"
+	ConsoleChat            = ConsoleBase + "/v1/chat/completions"
+	ConsoleDPoPToken       = ConsoleBase + "/v1/dpop/token"
+	ConsoleImageGeneration = ConsoleBase + "/v1/images/generations"
+	ConsoleImageEdits      = ConsoleBase + "/v1/images/edits"
+	ConsoleVideoGeneration = ConsoleBase + "/v1/videos/generations"
+	ConsoleVideos          = ConsoleBase + "/v1/videos"
 
 	// Console gRPC-Web endpoints (auth_mgmt, billing).
-	ConsoleListApiKeys       = ConsoleBase + "/auth_mgmt.AuthManagement/ListApiKeys"
-	ConsoleListModelsForTeam = ConsoleBase + "/auth_mgmt.AuthManagement/ListModelsForTeam"
-	ConsoleGetTeam           = ConsoleBase + "/auth_mgmt.AuthManagement/GetTeam"
-	ConsoleGetSpendingLimits = ConsoleBase + "/prod_mc_billing.UISvc/GetSpendingLimits"
+	ConsoleListApiKeys        = ConsoleBase + "/auth_mgmt.AuthManagement/ListApiKeys"
+	ConsoleListModelsForTeam  = ConsoleBase + "/auth_mgmt.AuthManagement/ListModelsForTeam"
+	ConsoleGetTeam            = ConsoleBase + "/auth_mgmt.AuthManagement/GetTeam"
+	ConsoleGetSpendingLimits  = ConsoleBase + "/prod_mc_billing.UISvc/GetSpendingLimits"
 	ConsoleListBalanceChanges = ConsoleBase + "/prod_mc_billing.UISvc/ListPrepaidBalanceChanges"
 )
 

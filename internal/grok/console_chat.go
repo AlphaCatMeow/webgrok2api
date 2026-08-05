@@ -10,6 +10,9 @@ import (
 // ConsoleModels maps the public model name → the console.x.ai model field.
 // Mirrors xai_console_chat.py CONSOLE_MODELS.
 var ConsoleModels = map[string]string{
+	"grok-imagine-image-console":           "grok-imagine-image",
+	"grok-imagine-image-quality-console":   "grok-imagine-image-quality",
+	"grok-imagine-video-console":           "grok-imagine-video",
 	"grok-4.5-console":                     "grok-4.5",
 	"grok-4.5-low":                         "grok-4.5",
 	"grok-4.5-medium":                      "grok-4.5",
